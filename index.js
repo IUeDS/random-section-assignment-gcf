@@ -1,4 +1,5 @@
 const axios = require('axios');
+const parseLinkHeader = require('parse-link-header');
 
 //Environment Params
 const apiBaseUrl = process.env.API_ROOT,
@@ -7,12 +8,104 @@ const apiBaseUrl = process.env.API_ROOT,
 //Setup the Axios client
 const apiClient = axios.create({
     baseURL: apiBaseUrl,
-    timeout: 5000,
+    timeout: 10000,
     headers: {'Authorization': 'Bearer ' + apiToken}
 });
 
 
 //Helper functions
+
+/**
+ * Function for making requests to Canvas API; handles paging, etc.
+ * 
+ * @param {string} urlPrefix Main portion of endpoint URL, excluding leading slash
+ * @param {Array} queryParams Array of objects where the key/value pairs become query params on the request (i.e., {"enrollment_type[]":"student"} )
+ * @param {string} requestType Request type (GET, POST, PUT, DELETE)
+ * @param {object} data Request payload
+ */
+async function canvasRequest(urlPrefix, queryParams = [], requestType = 'GET', data = null) {
+    let url = `${apiBaseUrl}${urlPrefix}?per_page=50`;
+    for (let queryParam of queryParams) {
+        url += `&${encodeURIComponent(queryParam.key)}=${encodeURIComponent(queryParam.value)}`;
+    }
+    let response = null;
+    let returnedData = [];
+    let requestsRemaining = true;
+    let nextPaginationLink = false;
+    let requestsMade = 0;
+
+    while (requestsRemaining) {
+        try {
+            if (requestType === 'GET') {
+                response = await apiClient.get(url);
+            }
+            else if (requestType === 'POST') {
+                response = await apiClient.post(url, data);
+            }
+            else if (requestType === 'PUT') {
+                response = await apiClient.put(url, data);
+            }
+            else if (requestType === 'DELETE') {
+                response = await apiClient.delete(url);
+            }
+
+            //if an array, we may need to combine paginated results;
+            //otherwise, just return the single or empty resource as is
+            if (Array.isArray(response.data)) {
+                returnedData = returnedData.concat(response.data);
+            }
+            else {
+                returnedData = response.data;
+            }
+
+            requestsMade++;
+            nextPaginationLink = getNextPaginationLink(response);
+
+            if (!nextPaginationLink) {
+                requestsRemaining = false;
+            }
+            else {
+                url = nextPaginationLink.url;
+            }
+
+            //fail-safe here so we don't accidentally end up in an infinite loop or
+            //land upon some Canvas resource that is too huge for us to handle
+            if (requestsMade > 50) {
+                throw new Error('Exiting Canvas API, too many requests made to url: ' + url);
+            }
+        }
+        catch (error) {
+            requestsRemaining = false;
+            const message = 'Error from URL ' + url + ': ' + error.message;
+            returnedData = message;
+            console.error(new Error(message));
+        }
+    }
+
+    return returnedData;
+}
+
+
+/**
+ * Given a Canvas API response, find and return the next pagination link in paged results
+ * 
+ * @param {object} response Canvas API response
+ * 
+ * @returns {mixed} The pagination link as a string, or false if none found. 
+ */
+function getNextPaginationLink(response) {
+    const paginationLink = response.headers.link;
+    let nextPaginationLink = false;
+
+    if (paginationLink) {
+        const parsedPaginationLink = parseLinkHeader(paginationLink);
+        nextPaginationLink = parsedPaginationLink.next;
+    }
+
+    return nextPaginationLink;
+}
+
+
 
 /**
  * Shuffles array in place. ES6 version
@@ -39,10 +132,10 @@ function shuffle(a) {
  */
 async function createSectionInCourse(sectionName, courseId) {
     try {
-        let newSection = await apiClient.post('/courses/' + courseId + '/sections?course_section[name]=' + sectionName);
-        return newSection.data;
+        let newSection = await canvasRequest('courses/' + courseId + '/sections', [{'key':'course_section[name]', 'value':sectionName}], 'POST');
+        return newSection;
     } catch (error) {
-        console.log("====> Error creating section '" + sectionName + "' in course " + courseId + ", API returned: " + error.message);
+        console.error(new Error(`Error creating section '${sectionName}' in course ${courseId}, API returned: ${error.message}`));
         return false;
     }
 }
@@ -59,30 +152,49 @@ async function createSectionInCourse(sectionName, courseId) {
  */
 async function enrollStudentInSection(userId, sectionId) {
     try {
-        let response = await apiClient.post('/sections/' + sectionId + '/enrollments?enrollment[type]=StudentEnrollment&enrollment[user_id]=' + userId);
-        return response.data;
+        let response = await canvasRequest('sections/' + sectionId + '/enrollments', [{'key':'enrollment[type]','value':'StudentEnrollment'}, {'key':'enrollment[user_id]','value':userId}], 'POST');
+        return response;
     } catch(error) {
-        console.log("====> Error enrolling user '" + userId + "' in section " + sectionId + ", API returned: " + error.message);
+        console.error(new Error(`Error enrolling user '${userId}' in section ${sectionId}, API returned: ${error.message}`));
         return false;
     }
 }
 
 
 /**
- * Concludes an enrollment in a course ID by enrollment ID 
- * TODO: Conclude or delete the enrollment?
+ * Retrieve enrollment object by section ID and user ID
+ * TODO: Not currently used. Remove?
+ * 
+ * @param {int} userId Canvas user ID
+ * @param {int} sectionId Canvas section ID
+ * 
+ * @returns enrollment JSON on success, false on failure
+ */
+async function getEnrollmentByUserAndSection(userId, sectionId) {
+    try {
+        let response = await canvasRequest('sections/' + sectionId + '/enrollments', [{'key':'user_id','value':userId}]);
+        return response[0]; //Note, API returns array even though only 1 enrollment should ever be returned. So return first array item.
+    } catch(error) {
+        console.error(new Error(`Error retrieving enrollment for user id '${userId}' in section ${sectionId}, API returned: ${error.message}`));
+        return false;
+    }
+}
+
+
+/**
+ * Delete an enrollment from a course ID by enrollment ID 
  * 
  * @param {int} courseId Canvas course ID
  * @param {int} enrollmentId Canvas enrollment ID
  * 
  * @returns deleted enrollment JSON on success, false on failure
  */
-async function unenrollStudentFromSection(courseId, enrollmentId) {
+async function deleteEnrollmentFromCourse(courseId, enrollmentId) {
     try {
-        let response = await apiClient.delete('/courses/' + courseId + '/enrollments/' + enrollmentId);
-        return response.data;
+        let response = await canvasRequest('courses/' + courseId + '/enrollments/' + enrollmentId, [{'key':'task','value':'delete'}], 'DELETE');
+        return response;
     } catch(error) {
-        console.log("====> Error enrolling user '" + userId + "' in section " + sectionId + ", API returned: " + error.message);
+        console.error(new Error(`Error deleting enrollment id '${enrollmentId}' from course ${courseId}, API returned: ${error.message}`));
         return false;
     }
 }
@@ -117,88 +229,93 @@ function indexOfSmallestArrayElement(a) {
     return lowestIndex;
 }
 
-
-
-
 /**
- * MAIN FUNCTION
- *
- * @param {!express:Request} req HTTP request context.
- * @param {!express:Response} res HTTP response context.
+ * Function that does the main work, called from the autoRandomSectionEnrollment function
+ * 
+ * Rewrite August 1 2019: Use main course student list for full roster: https://canvas.instructure.com/doc/api/courses.html#method.courses.users.
+ * Use section student enrollments to filter out those that have already been placed before doing the action.
+ * This saves us from having to know the IDs of the default section(s), which is helpful in the case of cross-listed courses (with multiple 'default' sections)
+ * When handling the 'drop' scenario, find those students that only have one enrollment in the course. 
+ * If it is one of our experimental sections, it means they are no longer in the main section(s) and can be dropped from the Experimental. 
+ * 
+ * @param {string} canvasCourseId Canvas Course ID
+ * @param {array} sectionNames Array of strings representing the experimental section names to be created and have enrollments distributed to
+ * 
+ * @returns {string} Text describing the result of the process, including any errors.
  */
-exports.autoRandomSectionEnrollment = async (req, res) => {
+async function main(canvasCourseId, sectionNames) {
 
-    let output = 'Begin output: \n',
-        courseId = 0,
-        defaultSection = {},
-        adHocSections = [],
-        adHocSectionEnrollmentTotals = [], //Use these values rather than the result of section.total_students so we can keep track of our enrollment totals as this script runs.
+    let course = null,
+        allStudentsInCourse = [],
+        experimentalSections = [],
+        experimentalSectionEnrollmentTotals = [], //Use these values rather than the result of section.total_students so we can keep track of our enrollment totals as this script runs.
 	    courseSections = [],
         studentsToBeRandomlyPlaced = [],
-        adHocEnrollmentsToBeRemoved = [];
+        experimentalEnrollmentsToBeRemoved = [];
 
-    //Expects default section ID and ad hoc section name array in request body:
-    //TODO: Validate input
-    let defaultSectionId = req.body.sectionid, // my test course's default section: 1606526, ben's test course default section: 2006214 
-        adHocSectionNames = req.body.sectionnames;
+    const courseId = canvasCourseId,
+          experimentalSectionNames = sectionNames;
 
 
     try {
+        //Get the course. Not technically required, but helpful for debugging output (course name, etc.)
+        let courseResponse = await canvasRequest('courses/'+ courseId);
+        course = courseResponse;
 
-        //Get default section data (NOTE: students don't come back from this endpoint with ?include[]=students. Don't know why.)
-        let defaultSectionResponse = await apiClient.get('/sections/' + defaultSectionId);
-        courseId = defaultSectionResponse.data.course_id;
+        //Get all students in the course
+        let allStudentsResponse = await canvasRequest('courses/'+ courseId + '/users', [{'key':'enrollment_type[]','value':'student'},{'key':'include[]','value':'enrollments'}]);
+        allStudentsInCourse = allStudentsResponse;
 
         //Get all sections for the course, including students in each section
-        let allSectionsResponse = await apiClient.get('/courses/'+ courseId + '/sections?include[]=total_students&include[]=students');
-        courseSections = allSectionsResponse.data;
+        let allSectionsResponse = await canvasRequest('courses/'+ courseId + '/sections', [{'key':'include[]','value':'total_students'}, {'key':'include[]','value':'students'}]);
+        courseSections = allSectionsResponse;
 
-        //Find the default section within the full list of sections, so we'll have the student enrollments without needing to make an additional API call.
-        defaultSection = courseSections[courseSections.findIndex(section => section.id === parseInt(defaultSectionId))];
+        console.log(`=====> Begin function result output for the course: ${course.name} (${course.id})`);
     } catch (error) {
-        res.send("Error while retrieving section data: " + error.message);
-        return;
+        //Cannot proceed. Log error and return out of the function.
+        console.error(new Error(`Error while retrieving initial course/student/section data: ${error.message}`));
+        return(`Error while retrieving student/section data: ${error.message}`);
     }
 
 
 
-    //Check to see if desired ad hoc sections already exist, create them if not
+    //Check to see if desired experimental sections already exist, create them if not
     //https://stackoverflow.com/questions/8217419/how-to-determine-if-javascript-array-contains-an-object-with-an-attribute-that-e
-    for(let i = 0; i < adHocSectionNames.length; i++) {
-        output += "Checking for section " + adHocSectionNames[i] + ". \n";
+    for(let i = 0; i < experimentalSectionNames.length; i++) {
+        console.log(`Checking for section '${experimentalSectionNames[i]}'...`);
         
-        let foundExistingAdHocSection = courseSections.filter( section => section['name'] === adHocSectionNames[i] );
+        let foundExistingExperimentalSection = courseSections.filter( section => section['name'] === experimentalSectionNames[i] );
         
-        if(foundExistingAdHocSection.length) {
-            output += "Section " + foundExistingAdHocSection[0].name + " was found. \n";
-            adHocSections.push(foundExistingAdHocSection[0]);
-            adHocSectionEnrollmentTotals[i] = foundExistingAdHocSection[0].total_students;
+        if(foundExistingExperimentalSection.length) {
+            console.log(`Already exists. `);
+            experimentalSections.push(foundExistingExperimentalSection[0]);
+            experimentalSectionEnrollmentTotals[i] = foundExistingExperimentalSection[0].total_students;
         } else {
-            output += "Section " + adHocSectionNames[i] + " was NOT found. \n";
+            console.log(`NOT FOUND. `);
             
-            //Create the ad hoc sections:
-            let newSection = await createSectionInCourse(adHocSectionNames[i], courseId);
+            //Create the experimental sections:
+            let newSection = await createSectionInCourse(experimentalSectionNames[i], courseId);
             
             if(newSection) {
-                adHocSections.push(newSection);
-                adHocSectionEnrollmentTotals[i] = 0;
+                experimentalSections.push(newSection);
+                experimentalSectionEnrollmentTotals[i] = 0;
 
-                output += "Created new section " + adHocSectionNames[i] + " in course id " + courseId + "\n";
+                console.log(`Created new section '${experimentalSectionNames[i]}' in course id ${courseId}`);
             } else {
-                output += "SECTION CREATE FAILED FOR " + adHocSectionNames[i] + " IN " + courseId + ". CHECK THE LOGS. \n";
+                console.error(new Error(`SECTION CREATE FAILED FOR '${experimentalSectionNames[i]}' IN ${courseId}.`));
             }
         }
     }
 
     /*
-    - Find all students in default section who are not already in one of the ad hoc sections
+    - Find all students in the course who are not already in one of the experimental sections
       Put in separate array (will be all students on first run)
     */
-    studentsToBeRandomlyPlaced = defaultSection.students.filter( (student) => { 
+    studentsToBeRandomlyPlaced = allStudentsInCourse.filter( (student) => { 
         let studentNotYetPlaced = true;
 
-        for(let i = 0; i < adHocSections.length; i++) {
-            if(Array.isArray(adHocSections[i].students) && adHocSections[i].students.findIndex(s => s.id === student.id) >= 0) {
+        for(let i = 0; i < experimentalSections.length; i++) {
+            if(Array.isArray(experimentalSections[i].students) && experimentalSections[i].students.findIndex(s => s.id === student.id) >= 0) {
                 studentNotYetPlaced = false;
             }
         }
@@ -215,55 +332,101 @@ exports.autoRandomSectionEnrollment = async (req, res) => {
             //Then proceed with sequential enrollment.
             //indexOfSmallestArrayElement() will return -1 if they are all the same, 
             //or an integer >= 0 for the first index of the section with the lowest enrollment
-            let adHocSectionArrayIndex = indexOfSmallestArrayElement(adHocSectionEnrollmentTotals);
-            if(adHocSectionArrayIndex < 0) {
-                if(i < adHocSections.length) {
-                    adHocSectionArrayIndex = i;
+            let experimentalSectionArrayIndex = indexOfSmallestArrayElement(experimentalSectionEnrollmentTotals);
+
+            if(experimentalSectionArrayIndex < 0) {
+                if(i < experimentalSections.length) {
+                    experimentalSectionArrayIndex = i;
                 } else {
-                    adHocSectionArrayIndex = i % adHocSections.length;
+                    experimentalSectionArrayIndex = i % experimentalSections.length;
                 }
             }
 
-            let newEnrollment = await enrollStudentInSection(studentsToBeRandomlyPlaced[i].id, adHocSections[adHocSectionArrayIndex].id);
+            let newEnrollment = await enrollStudentInSection(studentsToBeRandomlyPlaced[i].id, experimentalSections[experimentalSectionArrayIndex].id);
             if(newEnrollment) {
-                adHocSectionEnrollmentTotals[adHocSectionArrayIndex]++;
-                output += "Enrolled " + studentsToBeRandomlyPlaced[i].id + " in " + adHocSections[adHocSectionArrayIndex].id + "\n";
+                experimentalSectionEnrollmentTotals[experimentalSectionArrayIndex]++;
+                console.log(`Enrolled ${studentsToBeRandomlyPlaced[i].id} in ${experimentalSections[experimentalSectionArrayIndex].id}`);
             } else {
-                //TODO: Why does this code run when the enrollment does in fact succeed?
-                output += "ENROLLMENT FAILED FOR " + studentsToBeRandomlyPlaced[i].id + " IN " + adHocSections[adHocSectionArrayIndex].id + ". CHECK THE LOGS. \n";
+                console.error(new Error("ENROLLMENT FAILED FOR ${studentsToBeRandomlyPlaced[i].id} IN ${experimentalSections[experimentalSectionArrayIndex].id}."));
             }
             
         }
 
     } else {
-        //No students found in default section that are not yet placed in one of the ad hoc sections
-        output += "No students found in default section (" + defaultSectionId  + ") that need placement in ad hoc sections. \n";
+        //No students found in course that are not yet placed in one of the experimental sections
+        console.log(`No students found in the course (${courseId }) that need placement in experimental sections. `);
     }
 
-            // //TODO: On the flip side, if there are students in one of the ad-hoc sections that no longer appear in the default section,
-            // //they have dropped and they need to be removed from the ad hoc section so the course no longer appears in their list in Canvas.
-            // //Avoids confusion.
-
-            // //Build array of enrollments to remove from all ad hoc sections:
-            // for(let i = 0; i < adHocSections.length; i++) {
-            //     let enrollmentsToRemove = adHocSections[i].students.filter((student) => {
-            //         console.log("====> " + defaultSection.students.findIndex(s => s.id === student.id) + " \n");
-            //         if(defaultSection.students.findIndex(s => s.id === student.id) < 0) { 
-            //             return true;
-            //         } else {
-            //             return false;
-            //         }
-            //     });
-
-            //     adHocEnrollmentsToBeRemoved = adHocEnrollmentsToBeRemoved.concat(enrollmentsToRemove);
-            // }
-
-            // output += "Removing students: " + JSON.stringify(adHocEnrollmentsToBeRemoved) + " \n";
 
 
-    // output += JSON.stringify(defaultSection, null, '\t');
-    // output += JSON.stringify(adHocSections, null, '\t');
+    //Handle students who have dropped the course.
+    //If a student is found to only have one enrollment, and that enrollment is one of the experimental sections,
+    //the student has dropped the course. The experimental section enrollment should be dropped.
 
-    res.send(output);
+    for(let i = 0; i < allStudentsInCourse.length; i++) {
+        let thisStudentsEnrollments = allStudentsInCourse[i].enrollments;
+
+        //If this student only has one enrollment, and its section ID is one of the experimental sections, the enrollment should be removed. 
+        if(thisStudentsEnrollments.length === 1 && experimentalSections.findIndex(s => s.id === thisStudentsEnrollments[0].course_section_id) >= 0) { 
+            experimentalEnrollmentsToBeRemoved.push(thisStudentsEnrollments[0]);
+        }
+    }
+
+    if(experimentalEnrollmentsToBeRemoved.length) {
+        for(let i = 0; i < experimentalEnrollmentsToBeRemoved.length; i++) {
+            deleteEnrollmentFromCourse(courseId, experimentalEnrollmentsToBeRemoved[i].id);
+            console.log(`Removed student ${experimentalEnrollmentsToBeRemoved[i].user_id} from experimental section ${experimentalEnrollmentsToBeRemoved[i].course_section_id}`); 
+        }
+    } else {
+        console.log(`No students found with only experimental section enrollments (dropped course). `);
+    }
+
+    return (`Main function complete for course: ${course.name} (${course.id})`);
 
 };
+
+
+
+
+
+/**
+ * MAIN FUNCTION - PubSub
+ *
+ * @param {object} pubSubEvent The event payload.
+ * @param {object} context The event metadata.
+ */
+exports.autoRandomSectionEnrollmentPubsub = async (pubSubEvent, context) => {
+
+    //Ensure we have the data we need, either from a local config file, or passed to the function at runtime
+    //Note, pubsub message is a JSON string that is Base64 encoded. Decode, and parse JSON.
+    const messageDataAsJson = JSON.parse(Buffer.from(pubSubEvent.data, 'base64').toString());
+    const data = messageDataAsJson.data;
+    if(!Array.isArray(data)) {
+        console.error(new Error(`No data available to run the function.`));
+        return;
+    }
+    
+    //Call the primary function for each course in the data array
+    for(let i = 0; i < data.length; i++) {
+        if(data[i].courseid && data[i].sectionnames) {
+            let result = await main(data[i].courseid, data[i].sectionnames);
+            console.log(result);
+        } else {
+            console.error(new Error(`Missing course ID or experimental section names for data index ${i}.`));
+        }
+    }
+
+    console.log(`Function autoRandomSectionEnrollmentPubsub execution complete.`);
+};
+
+
+// /**
+//  * MAIN FUNCTION - HTTP
+//  *
+//  * @param {!express:Request} req HTTP request context.
+//  * @param {!express:Response} res HTTP response context.
+//  */
+// exports.autoRandomSectionEnrollment = async (req, res) => {
+//      ...code here...
+//      res.send(functionResultText.join('\n\n'));
+// };

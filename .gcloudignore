@@ -14,5 +14,10 @@
 .gitignore
 
 node_modules
+_archive
 example-enrollments-json.json
+mock-pubsub.json
+scratchpad.*
 .env*
+package-lock.json
+.DS_Store

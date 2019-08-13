@@ -1,0 +1,10 @@
+{
+    "message": {
+      "attributes": {
+        "key": "value"
+      },
+      "data": "ewogICAgImRhdGEiOiBbCiAgICAgICAgewogICAgICAgICAgICAiY291cnNlaWQiOiIxNDAyNzg3IiwKICAgICAgICAgICAgInNlY3Rpb25uYW1lcyI6IFsKICAgICAgICAgICAgICAgICJDb25kaXRpb24gMSIsCiAgICAgICAgICAgICAgICAiQ29uZGl0aW9uIDIiCiAgICAgICAgICAgIF0KICAgICAgICB9LAogICAgICAgIHsKICAgICAgICAgICAgImNvdXJzZWlkIjoiMTc2NzgzOCIsCiAgICAgICAgICAgICJzZWN0aW9ubmFtZXMiOiBbCiAgICAgICAgICAgICAgICAiQ29uZGl0aW9uIDEiLAogICAgICAgICAgICAgICAgIkNvbmRpdGlvbiAyIgogICAgICAgICAgICBdCiAgICAgICAgfQoKICAgIF0KfQ==",
+      "messageId": "012345678901"
+    },
+    "subscription": "projects/myproject/subscriptions/experimentalsectionenrollment"
+}

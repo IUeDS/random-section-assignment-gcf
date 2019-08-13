@@ -2,6 +2,11 @@
       "name": "random-section-enrollment-gcf",
       "version": "0.1.0",
       "dependencies": {
-            "axios": "^0.18.1"
+            "@google-cloud/functions-framework": "^1.2.1",
+            "axios": "^0.18.1",
+            "parse-link-header": "^1.0.1"
+      },
+      "scripts": {
+            "start": "functions-framework --signature-type=event --target=autoRandomSectionEnrollmentPubsub"
       }
 }
