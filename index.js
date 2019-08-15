@@ -132,7 +132,7 @@ function shuffle(a) {
  */
 async function createSectionInCourse(sectionName, courseId) {
     try {
-        let newSection = await canvasRequest('courses/' + courseId + '/sections', [{'key':'course_section[name]', 'value':sectionName}], 'POST');
+        let newSection = await canvasRequest('/courses/' + courseId + '/sections', [{'key':'course_section[name]', 'value':sectionName}], 'POST');
         return newSection;
     } catch (error) {
         console.error(new Error(`Error creating section '${sectionName}' in course ${courseId}, API returned: ${error.message}`));
