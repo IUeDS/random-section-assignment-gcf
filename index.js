@@ -18,7 +18,7 @@ const apiClient = axios.create({
 /**
  * Function for making requests to Canvas API; handles paging, etc.
  * 
- * @param {string} urlPrefix Main portion of endpoint URL, excluding leading slash
+ * @param {string} urlPrefix Main portion of endpoint URL, including leading slash
  * @param {Array} queryParams Array of objects where the key/value pairs become query params on the request (i.e., {"enrollment_type[]":"student"} )
  * @param {string} requestType Request type (GET, POST, PUT, DELETE)
  * @param {object} data Request payload
@@ -152,7 +152,7 @@ async function createSectionInCourse(sectionName, courseId) {
  */
 async function enrollStudentInSection(userId, sectionId) {
     try {
-        let response = await canvasRequest('sections/' + sectionId + '/enrollments', [{'key':'enrollment[type]','value':'StudentEnrollment'}, {'key':'enrollment[user_id]','value':userId}], 'POST');
+        let response = await canvasRequest('/sections/' + sectionId + '/enrollments', [{'key':'enrollment[type]','value':'StudentEnrollment'}, {'key':'enrollment[enrollment_state]','value':'active'}, {'key':'enrollment[user_id]','value':userId}], 'POST');
         return response;
     } catch(error) {
         console.error(new Error(`Error enrolling user '${userId}' in section ${sectionId}, API returned: ${error.message}`));
@@ -172,7 +172,7 @@ async function enrollStudentInSection(userId, sectionId) {
  */
 async function getEnrollmentByUserAndSection(userId, sectionId) {
     try {
-        let response = await canvasRequest('sections/' + sectionId + '/enrollments', [{'key':'user_id','value':userId}]);
+        let response = await canvasRequest('/sections/' + sectionId + '/enrollments', [{'key':'user_id','value':userId}]);
         return response[0]; //Note, API returns array even though only 1 enrollment should ever be returned. So return first array item.
     } catch(error) {
         console.error(new Error(`Error retrieving enrollment for user id '${userId}' in section ${sectionId}, API returned: ${error.message}`));
@@ -191,7 +191,7 @@ async function getEnrollmentByUserAndSection(userId, sectionId) {
  */
 async function deleteEnrollmentFromCourse(courseId, enrollmentId) {
     try {
-        let response = await canvasRequest('courses/' + courseId + '/enrollments/' + enrollmentId, [{'key':'task','value':'delete'}], 'DELETE');
+        let response = await canvasRequest('/courses/' + courseId + '/enrollments/' + enrollmentId, [{'key':'task','value':'delete'}], 'DELETE');
         return response;
     } catch(error) {
         console.error(new Error(`Error deleting enrollment id '${enrollmentId}' from course ${courseId}, API returned: ${error.message}`));
@@ -259,15 +259,15 @@ async function main(canvasCourseId, sectionNames) {
 
     try {
         //Get the course. Not technically required, but helpful for debugging output (course name, etc.)
-        let courseResponse = await canvasRequest('courses/'+ courseId);
+        let courseResponse = await canvasRequest('/courses/'+ courseId);
         course = courseResponse;
 
         //Get all students in the course
-        let allStudentsResponse = await canvasRequest('courses/'+ courseId + '/users', [{'key':'enrollment_type[]','value':'student'},{'key':'include[]','value':'enrollments'}]);
+        let allStudentsResponse = await canvasRequest('/courses/'+ courseId + '/users', [{'key':'enrollment_type[]','value':'student'},{'key':'include[]','value':'enrollments'}]);
         allStudentsInCourse = allStudentsResponse;
 
         //Get all sections for the course, including students in each section
-        let allSectionsResponse = await canvasRequest('courses/'+ courseId + '/sections', [{'key':'include[]','value':'total_students'}, {'key':'include[]','value':'students'}]);
+        let allSectionsResponse = await canvasRequest('/courses/'+ courseId + '/sections', [{'key':'include[]','value':'total_students'}, {'key':'include[]','value':'students'}]);
         courseSections = allSectionsResponse;
 
         console.log(`=====> Begin function result output for the course: ${course.name} (${course.id})`);
