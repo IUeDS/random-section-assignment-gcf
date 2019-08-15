@@ -21,3 +21,5 @@ scratchpad.*
 .env*
 package-lock.json
 .DS_Store
+README.md
+LICENSE.md

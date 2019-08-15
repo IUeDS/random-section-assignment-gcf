@@ -48,7 +48,7 @@ Helpful gcloud commands
 NOTE: Need to export env variables before starting the emulator in order for them to be accessible. From the command line:
 
 ```
-export API_ROOT=https://<domain>.instructure.com/api/v1/
+export API_ROOT=<api_root_url>
 export API_TOKEN=<token>
 ```
 
@@ -131,9 +131,10 @@ curl -d "@mock-pubsub.json" -X POST -H "Ce-Type: true" -H "Ce-Specversion: true"
 
 
 #### For production deployment, use the gcloud cli.
+Note the trailing slash at the end of the API_ROOT value.
 ```
 gcloud functions deploy autoRandomSectionEnrollmentPubsub 
-	--set-env-vars API_ROOT=https://<domain>.instructure.com/api/v1/,API_TOKEN=<token> 
+	--set-env-vars API_ROOT=https://lmsproxy-beta.uits.iu.edu/lmspx-reg/canvas/,API_TOKEN=<token> 
 	--runtime nodejs10 
 	--timeout 540s 
 	--trigger-topic experimentalsectionenrollment
