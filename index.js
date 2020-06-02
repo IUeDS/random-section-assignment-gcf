@@ -9,7 +9,7 @@ const apiBaseUrl = process.env.API_ROOT,
 const apiClient = axios.create({
     baseURL: apiBaseUrl,
     timeout: 10000,
-    headers: {'X-IU-Authorization': apiToken}
+    headers: {'Authorization': 'Bearer ' + apiToken}
 });
 
 
