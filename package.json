@@ -3,7 +3,7 @@
       "version": "0.1.0",
       "dependencies": {
             "@google-cloud/functions-framework": "^1.2.1",
-            "axios": "^0.18.1",
+            "axios": "^0.21.1",
             "parse-link-header": "^1.0.1"
       },
       "scripts": {
